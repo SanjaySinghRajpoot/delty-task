@@ -1,0 +1,23 @@
+version: '3.8'
+
+networks:
+  fastapi-network:
+    driver: bridge
+
+volumes:
+  delty_pgdata:
+
+services:
+  db:
+    image: postgres:alpine
+    container_name: delty-db
+    volumes:
+      - delty_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: delty-task
+    networks:
+      - fastapi-network
