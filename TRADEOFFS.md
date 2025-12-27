@@ -54,22 +54,9 @@
 
 ---
 
-### 5. Loose TypeScript Types
+### 5. Unified LLM Library Design
 
-**What we did:** Used `any` in several places, especially in the LLM providers when handling SDK responses.
-
-**Why it matters:**
-- TypeScript can't catch bugs at compile time if we're using `any`.
-- Each LLM provider has different response shapes - instead of typing them properly, we just cast to `any` and hope for the best.
-- Makes refactoring scary - change something and you won't know what breaks until runtime.
-
-**Impact:** Faster to write initially. Technical debt that will bite us when we add more providers or change the event format. Should add proper types with discriminated unions.
-
----
-
-## Unified LLM Library Design
-
-### The Interface
+**What we did:** Built a single interface that abstracts Anthropic, Gemini (and future OpenAI) behind one consistent API.
 
 ```typescript
 interface LLMProvider {
@@ -82,16 +69,18 @@ interface LLMProvider {
 }
 ```
 
-Single method, callback-based streaming. Each provider (Anthropic, Gemini) implements this interface and translates their native SDK responses into our unified `StreamEvent` format.
+**Why it matters:**
+- Each provider SDK has completely different event shapes. Anthropic uses `content_block_delta`, Gemini uses `candidates[].content.parts`. We translate both into our unified `StreamEvent` format.
+- Callback-based streaming gives fine-grained control - each token hits the client immediately, no buffering.
+- Factory pattern (`createLLMProvider`) keeps provider initialization isolated. Swap providers without touching business logic.
+- Adding OpenAI is ~150 lines: implement the interface, handle their delta format, map to our event types.
 
-**Why this approach:**
-- Callback-based streaming gives us fine-grained control over event delivery without buffering. Each token hits the client as soon as it arrives from the provider.
-- Factory pattern (`createLLMProvider`) keeps provider initialization isolated - swap providers without touching business logic.
-- Adding OpenAI is roughly 150 lines: implement the interface, handle their delta format, map to our event types.
+**Tradeoffs:**
+- Used `any` in several places for SDK responses instead of proper types. Faster to write, but TypeScript can't catch bugs at compile time.
+- The callback approach doesn't compose well for multi-turn tool use where you need to feed tool results back. Would need a `continueWithToolResult()` method.
+- Config types are loose. Should tighten with discriminated unions per provider.
 
-**What I'd do differently at scale:**
-- The callback approach works for single-request scenarios but doesn't compose well for multi-turn tool use where you need to feed tool results back. Would add a `continueWithToolResult()` method.
-- Config types are loose (`any` in spots). Would tighten with discriminated unions per provider.
+**Impact:** Clean abstraction that proves provider-agnostic streaming works. The loose typing is tech debt that will bite when adding providers or changing event format.
 
 ## Streaming Architecture
 
