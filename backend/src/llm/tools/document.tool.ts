@@ -70,7 +70,8 @@ export async function executeDocumentTool(
         };
       }
 
-      const doc = await DocumentModel.create({
+      // Use upsert to handle existing documents
+      const doc = await DocumentModel.upsert({
         document_id,
         title,
         content,

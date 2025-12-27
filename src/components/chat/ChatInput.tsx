@@ -26,17 +26,23 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   };
 
   return (
-    <div className="flex gap-2">
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Type your message..."
-        disabled={disabled}
-        className="flex-1 resize-none rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        rows={3}
-      />
-      <Button onClick={handleSend} disabled={disabled || !message.trim()}>
+    <div className="flex gap-3 items-end">
+      <div className="flex-1 relative">
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type your message..."
+          disabled={disabled}
+          className="w-full resize-none rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 dark:focus:border-blue-400 transition-all shadow-sm"
+          rows={3}
+        />
+      </div>
+      <Button
+        onClick={handleSend}
+        disabled={disabled || !message.trim()}
+        className="h-11 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-medium"
+      >
         Send
       </Button>
     </div>

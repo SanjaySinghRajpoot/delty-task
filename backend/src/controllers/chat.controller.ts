@@ -182,9 +182,9 @@ Be helpful, friendly, and proactive in assisting users with their document needs
               const { id, name, arguments: args } = event.data;
               pendingToolCalls.delete(id);
 
-              // Execute tool
+              // Update existing tool event to executing status instead of creating a new one
               sendEvent({
-                type: 'tool_call_start',
+                type: 'tool_call_delta',
                 data: { id, name, status: 'executing' },
               });
 

@@ -7,6 +7,7 @@ import { ThinkingPanel } from '@/components/chat/ThinkingPanel';
 import { ToolEventsPanel } from '@/components/chat/ToolEventsPanel';
 import { DocumentViewer } from '@/components/chat/DocumentViewer';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useChatStore } from '@/store/chatStore';
 
 export interface StreamEvent {
   type: 'text_delta' | 'thinking_delta' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
@@ -14,23 +15,26 @@ export interface StreamEvent {
   error?: string;
 }
 
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 type ProviderType = 'anthropic' | 'gemini';
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    conversationId,
+    messages,
+    currentDocument,
+    provider,
+    setConversationId,
+    setMessages,
+    addMessage,
+    updateLastMessage,
+    setCurrentDocument,
+    setProvider: setStoreProvider,
+  } = useChatStore();
+
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [thinking, setThinking] = useState('');
   const [toolEvents, setToolEvents] = useState<any[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [currentDocument, setCurrentDocument] = useState<{ document_id: string; content: string; title?: string } | null>(null);
-  const [conversationId] = useState(() => `conv-${Date.now()}`);
-  const [provider, setProvider] = useState<ProviderType>('gemini');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -41,16 +45,49 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, currentAssistantMessage]);
 
+  // Load conversation history on mount
+  useEffect(() => {
+    const loadConversationHistory = async () => {
+      try {
+        const response = await fetch(`http://localhost:3001/api/chat/messages/${conversationId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
+            // Filter out system messages and convert to Message format
+            const chatMessages = data.messages
+              .filter((m: any) => m.role !== 'system')
+              .map((m: any) => ({
+                id: `msg-${m.id}`,
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+              }));
+            if (chatMessages.length > 0) {
+              setMessages(chatMessages);
+            }
+          }
+        } else if (response.status === 404) {
+          // Conversation doesn't exist yet, that's fine
+          console.log('No conversation history found, starting fresh');
+        }
+      } catch (error) {
+        console.error('Failed to load conversation history:', error);
+        // Don't show error to user, just start fresh
+      }
+    };
+
+    loadConversationHistory();
+  }, [conversationId, setMessages]);
+
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || isStreaming) return;
 
     // Add user message
-    const userMessage: Message = {
+    const userMessage = {
       id: `msg-${Date.now()}`,
-      role: 'user',
+      role: 'user' as const,
       content: message,
     };
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
     setCurrentAssistantMessage('');
     setThinking('');
     setToolEvents([]);
@@ -104,16 +141,41 @@ export default function ChatPage() {
       }
     } catch (error: any) {
       console.error('Chat error:', error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: `Error: ${error.message}`,
-        },
-      ]);
+      addMessage({
+        id: `msg-${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${error.message}`,
+      });
     } finally {
       setIsStreaming(false);
+    }
+  };
+
+  const handleDocumentUpdate = async (document_id: string, content: string, title?: string) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/chat/documents/${document_id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content, title }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update document');
+      }
+
+      const data = await response.json();
+      if (data.document) {
+        setCurrentDocument({
+          document_id: data.document.document_id,
+          content: data.document.content,
+          title: data.document.title,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to update document:', error);
+      throw error;
     }
   };
 
@@ -128,16 +190,30 @@ export default function ChatPage() {
         break;
 
       case 'tool_call_start':
-        setToolEvents((prev) => [
-          ...prev,
-          {
-            id: `${event.data?.id || 'tool'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: event.data?.name,
-            status: 'started',
-            timestamp: new Date(),
-            toolCallId: event.data?.id, // Store original ID for matching updates
-          },
-        ]);
+        // Only add if it doesn't already exist (avoid duplicates)
+        setToolEvents((prev) => {
+          const existingIndex = prev.findIndex((e) => (e as any).toolCallId === event.data?.id);
+          if (existingIndex >= 0) {
+            // Update existing event
+            const updated = [...prev];
+            updated[existingIndex] = {
+              ...updated[existingIndex],
+              status: event.data?.status || 'started',
+            };
+            return updated;
+          }
+          // Add new event
+          return [
+            ...prev,
+            {
+              id: `${event.data?.id || 'tool'}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: event.data?.name,
+              status: event.data?.status || 'started',
+              timestamp: new Date(),
+              toolCallId: event.data?.id, // Store original ID for matching updates
+            },
+          ];
+        });
         break;
 
       case 'tool_call_delta':
@@ -219,14 +295,11 @@ export default function ChatPage() {
 
       case 'done':
         if (currentAssistantMessage) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg-${Date.now()}`,
-              role: 'assistant',
-              content: currentAssistantMessage,
-            },
-          ]);
+          addMessage({
+            id: `msg-${Date.now()}`,
+            role: 'assistant',
+            content: currentAssistantMessage,
+          });
           setCurrentAssistantMessage('');
         }
         break;
@@ -238,17 +311,24 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="border-b border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
-          <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Chat</h1>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600 dark:text-gray-400">Model:</label>
-              <Select value={provider} onValueChange={(value) => setProvider(value as ProviderType)} disabled={isStreaming}>
-                <SelectTrigger className="w-32">
+        <div className="border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm shadow-sm">
+          <div className="flex items-center justify-between px-6 py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center">
+                <span className="text-white font-bold text-sm">D</span>
+              </div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
+                Delty Chat
+              </h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Model:</label>
+              <Select value={provider} onValueChange={(value) => setStoreProvider(value as ProviderType)} disabled={isStreaming}>
+                <SelectTrigger className="w-36 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -261,7 +341,20 @@ export default function ChatPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-6 scroll-smooth min-h-0">
+          {messages.length === 0 && !currentAssistantMessage && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-3">
+                <div className="h-16 w-16 rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 flex items-center justify-center mx-auto">
+                  <span className="text-2xl">💬</span>
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">Welcome to Delty Chat</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Start a conversation to get started</p>
+                </div>
+              </div>
+            </div>
+          )}
           {messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} />
           ))}
@@ -279,16 +372,16 @@ export default function ChatPage() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+        <div className="border-t border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm p-4">
           <ChatInput onSend={handleSendMessage} disabled={isStreaming} />
         </div>
       </div>
 
       {/* Side Panels */}
-      <div className="w-80 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800">
+      <div className="w-96 border-l border-slate-200/80 dark:border-slate-800/80 flex flex-col bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm overflow-hidden">
         <ThinkingPanel thinking={thinking} />
         <ToolEventsPanel events={toolEvents} />
-        <DocumentViewer document={currentDocument} />
+        <DocumentViewer document={currentDocument} onDocumentUpdate={handleDocumentUpdate} />
       </div>
     </div>
   );
