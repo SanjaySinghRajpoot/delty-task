@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ThinkingPanel } from '@/components/chat/ThinkingPanel';
@@ -36,6 +36,7 @@ export default function ChatPage() {
   const [toolEvents, setToolEvents] = useState<any[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pendingZustandUpdate = useRef<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -44,6 +45,14 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentAssistantMessage]);
+
+  // Update Zustand store after React state updates to avoid render warnings
+  useEffect(() => {
+    if (pendingZustandUpdate.current !== null) {
+      updateLastMessage(pendingZustandUpdate.current);
+      pendingZustandUpdate.current = null;
+    }
+  }, [currentAssistantMessage, updateLastMessage]);
 
   // Load conversation history on mount
   useEffect(() => {
@@ -54,10 +63,11 @@ export default function ChatPage() {
           const data = await response.json();
           if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
             // Filter out system messages and convert to Message format
+            // Use database ID to ensure uniqueness and prevent conflicts with new messages
             const chatMessages = data.messages
               .filter((m: any) => m.role !== 'system')
-              .map((m: any) => ({
-                id: `msg-${m.id}`,
+              .map((m: any, index: number) => ({
+                id: `msg-db-${m.id}-${index}`, // Use database ID with index for uniqueness
                 role: m.role as 'user' | 'assistant',
                 content: m.content,
               }));
@@ -81,13 +91,17 @@ export default function ChatPage() {
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || isStreaming) return;
 
-    // Add user message
+    // Add user message with unique ID
     const userMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: 'user' as const,
       content: message,
     };
     addMessage(userMessage);
+    
+    // Initialize assistant message in store for streaming (empty string creates new message)
+    // This ensures the assistant message exists in the messages array during streaming
+    updateLastMessage('');
     setCurrentAssistantMessage('');
     setThinking('');
     setToolEvents([]);
@@ -123,18 +137,47 @@ export default function ChatPage() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        // Decode chunk and add to buffer
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        
+        // Process complete lines (ending with \n\n for SSE)
         const lines = buffer.split('\n');
+        // Keep incomplete line in buffer
         buffer = lines.pop() || '';
 
         for (const line of lines) {
+          // Skip empty lines and comments
+          if (!line.trim() || line.startsWith(':')) continue;
+          
           if (line.startsWith('data: ')) {
             try {
-              const event: StreamEvent = JSON.parse(line.slice(6));
-              // Handle events immediately for real-time streaming
-              handleStreamEvent(event);
+              const eventData = line.slice(6).trim();
+              if (eventData) {
+                const event: StreamEvent = JSON.parse(eventData);
+                // Handle events immediately for real-time streaming
+                handleStreamEvent(event);
+              }
             } catch (e) {
               console.error('Failed to parse event:', e, line);
+            }
+          }
+        }
+      }
+      
+      // Process any remaining data in buffer
+      if (buffer.trim()) {
+        const lines = buffer.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const eventData = line.slice(6).trim();
+              if (eventData) {
+                const event: StreamEvent = JSON.parse(eventData);
+                handleStreamEvent(event);
+              }
+            } catch (e) {
+              console.error('Failed to parse remaining event:', e, line);
             }
           }
         }
@@ -142,7 +185,7 @@ export default function ChatPage() {
     } catch (error: any) {
       console.error('Chat error:', error);
       addMessage({
-        id: `msg-${Date.now()}`,
+        id: `msg-error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
         content: `Error: ${error.message}`,
       });
@@ -182,11 +225,23 @@ export default function ChatPage() {
   const handleStreamEvent = (event: StreamEvent) => {
     switch (event.type) {
       case 'text_delta':
-        setCurrentAssistantMessage((prev) => prev + (event.data?.delta || ''));
+        const delta = event.data?.delta || '';
+        if (delta) {
+          // Update local state for immediate UI update (chunk by chunk)
+          setCurrentAssistantMessage((prev) => {
+            const newContent = prev + delta;
+            // Store pending update to be processed by useEffect (avoids render warning)
+            pendingZustandUpdate.current = newContent;
+            return newContent;
+          });
+        }
         break;
 
       case 'thinking_delta':
-        setThinking((prev) => prev + (event.data?.delta || ''));
+        const thinkingDelta = event.data?.delta || '';
+        if (thinkingDelta) {
+          setThinking((prev) => prev + thinkingDelta);
+        }
         break;
 
       case 'tool_call_start':
@@ -219,21 +274,11 @@ export default function ChatPage() {
       case 'tool_call_delta':
         // Handle document data from backend (direct format)
         if (event.data?.document_id && event.data?.content) {
-          // Update document content in real-time
-          setCurrentDocument((prev) => {
-            // If it's the same document, update it; otherwise create new
-            if (prev && prev.document_id === event.data.document_id) {
-              return {
-                document_id: prev.document_id,
-                content: event.data.content,
-                title: event.data.title || prev.title,
-              };
-            }
-            return {
-              document_id: event.data.document_id,
-              content: event.data.content,
-              title: event.data.title,
-            };
+          // Always update to show the latest document (replace current one)
+          setCurrentDocument({
+            document_id: event.data.document_id,
+            content: event.data.content,
+            title: event.data.title,
           });
         }
         // Handle document data from LLM provider (delta JSON string format)
@@ -241,20 +286,11 @@ export default function ChatPage() {
           try {
             const deltaData = JSON.parse(event.data.delta);
             if (deltaData.document_id && deltaData.content) {
-              setCurrentDocument((prev) => {
-                // If it's the same document, update it; otherwise create new
-                if (prev && prev.document_id === deltaData.document_id) {
-                  return {
-                    document_id: prev.document_id,
-                    content: deltaData.content,
-                    title: deltaData.title || prev.title,
-                  };
-                }
-                return {
-                  document_id: deltaData.document_id,
-                  content: deltaData.content,
-                  title: deltaData.title,
-                };
+              // Always update to show the latest document
+              setCurrentDocument({
+                document_id: deltaData.document_id,
+                content: deltaData.content,
+                title: deltaData.title,
               });
             }
           } catch (e) {
@@ -281,6 +317,7 @@ export default function ChatPage() {
           return updated;
         });
         // Update document if the tool result contains document data
+        // Always show the latest document created/updated
         if (event.data?.result?.success && event.data?.result?.document_id) {
           // Fetch the full document or use the result data
           if (event.data?.result?.content) {
@@ -294,14 +331,13 @@ export default function ChatPage() {
         break;
 
       case 'done':
+        // The message is already in the store via updateLastMessage
+        // Just clear the streaming state - don't add duplicate
         if (currentAssistantMessage) {
-          addMessage({
-            id: `msg-${Date.now()}`,
-            role: 'assistant',
-            content: currentAssistantMessage,
-          });
-          setCurrentAssistantMessage('');
+          // Final update to ensure content is saved (message already exists in store)
+          updateLastMessage(currentAssistantMessage);
         }
+        setCurrentAssistantMessage('');
         break;
 
       case 'error':
@@ -355,17 +391,43 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {messages.map((msg) => (
-            <ChatMessage key={msg.id} message={msg} />
-          ))}
-          {currentAssistantMessage && (
+          {messages.map((msg, index) => {
+            // Check if this is the last message and it's being streamed
+            const isLastMessage = index === messages.length - 1;
+            const isStreamingMessage = Boolean(
+              isLastMessage &&
+              msg.role === 'assistant' &&
+              isStreaming &&
+              currentAssistantMessage &&
+              currentAssistantMessage.length > (msg.content?.length || 0)
+            );
+            
+            // Use streaming content if this message is currently being streamed
+            const displayContent = isStreamingMessage ? currentAssistantMessage : msg.content;
+            
+            // Use index as fallback for key to ensure uniqueness
+            return (
+              <ChatMessage
+                key={`${msg.id}-${index}`}
+                message={{
+                  ...msg,
+                  content: displayContent,
+                }}
+                isStreaming={isStreamingMessage}
+              />
+            );
+          })}
+          {/* Show streaming message if no assistant message exists in store yet but we're receiving chunks */}
+          {currentAssistantMessage && 
+           isStreaming && 
+           (messages.length === 0 || messages[messages.length - 1].role !== 'assistant') && (
             <ChatMessage
               message={{
-                id: 'current',
+                id: 'current-streaming',
                 role: 'assistant',
                 content: currentAssistantMessage,
               }}
-              isStreaming
+              isStreaming={true}
             />
           )}
           <div ref={messagesEndRef} />

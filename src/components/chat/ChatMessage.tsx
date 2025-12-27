@@ -1,4 +1,4 @@
-import { Message } from '@/app/chat/page';
+import { Message } from '@/store/chatStore';
 import { User, Bot } from 'lucide-react';
 
 interface ChatMessageProps {

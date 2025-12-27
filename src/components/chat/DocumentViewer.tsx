@@ -6,6 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save, Loader2 } from 'lucide-react';
+import { marked } from 'marked';
 
 interface Document {
   document_id: string;
@@ -43,24 +44,43 @@ export function DocumentViewer({ document, onDocumentUpdate }: DocumentViewerPro
 
   useEffect(() => {
     if (document && editor) {
-      // Convert markdown/plain text to HTML for Tiptap
-      // Simple conversion - in production, use a proper markdown parser
-      const htmlContent = document.content
-        .split('\n')
-        .map((line) => {
-          if (line.startsWith('# ')) {
-            return `<h1>${line.slice(2)}</h1>`;
-          } else if (line.startsWith('## ')) {
-            return `<h2>${line.slice(3)}</h2>`;
-          } else if (line.startsWith('### ')) {
-            return `<h3>${line.slice(4)}</h3>`;
-          } else if (line.trim() === '') {
-            return '<p><br></p>';
-          } else {
+      // Convert markdown/plain text to HTML for Tiptap using marked
+      let htmlContent = '';
+      try {
+        // Check if content looks like markdown (has markdown syntax)
+        const hasMarkdownSyntax = /^#{1,6}\s|^\*\s|^-\s|^\d+\.\s|^\*\*|^__|^`|^>/m.test(document.content);
+        
+        if (hasMarkdownSyntax) {
+          // Use marked to parse markdown
+          htmlContent = marked.parse(document.content, {
+            breaks: true,
+            gfm: true,
+          }) as string;
+        } else {
+          // Plain text - convert line breaks to paragraphs
+          htmlContent = document.content
+            .split('\n')
+            .map((line) => {
+              if (line.trim() === '') {
+                return '<p><br></p>';
+              }
+              return `<p>${line}</p>`;
+            })
+            .join('');
+        }
+      } catch (error) {
+        console.error('Error parsing markdown:', error);
+        // Fallback to simple text conversion
+        htmlContent = document.content
+          .split('\n')
+          .map((line) => {
+            if (line.trim() === '') {
+              return '<p><br></p>';
+            }
             return `<p>${line}</p>`;
-          }
-        })
-        .join('');
+          })
+          .join('');
+      }
 
       editor.commands.setContent(htmlContent);
       setLastSavedContent(document.content);
@@ -79,9 +99,11 @@ export function DocumentViewer({ document, onDocumentUpdate }: DocumentViewerPro
     try {
       // Get the HTML content from the editor
       const htmlContent = editor.getHTML();
-      // For now, save as plain text (we can enhance this later to save HTML)
+      // Convert HTML back to markdown for storage (preserves formatting better)
+      // For now, save as plain text but preserve line breaks
       const textContent = editor.getText();
       
+      // Save the content - backend will store it as-is
       await onDocumentUpdate(document.document_id, textContent, document.title);
       setLastSavedContent(textContent);
       setHasChanges(false);

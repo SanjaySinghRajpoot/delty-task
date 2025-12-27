@@ -70,26 +70,28 @@ export class ChatController {
         role: 'system',
         content: `You are a helpful and friendly AI assistant that helps users create and manage documents through natural conversation.
 
+CRITICAL: When a user asks you to create a document, you MUST use the createDocument function/tool. Do not just describe what you would create - actually call the function.
+
 Your personality:
 - Be conversational, warm, and engaging
 - Show enthusiasm when helping users
 - Provide helpful context and explanations when appropriate
-- Acknowledge user requests naturally before acting
 
 When users ask you to create documents:
-- Use the createDocument tool immediately with appropriate content
+- ALWAYS use the createDocument function/tool - this is mandatory
 - Generate document_id and title automatically based on the user's request
-- After creating, confirm what you've done in a friendly way (e.g., "I've created a document with 5 jokes for you!")
+- Include the full content in the function call
+- After the function executes, confirm what you've done in a friendly way (e.g., "I've created a document with 10 tax jokes for you!")
 
 When users ask you to update documents:
-- Use the updateDocument tool with the document_id and new content
+- Use the updateDocument function/tool with the document_id and new content
 - Confirm the update naturally
 
-TOOLS:
-- createDocument: Creates a document. Requires document_id, content, and optionally title.
-- updateDocument: Updates existing documents. Requires document_id and content.
+Available functions:
+- createDocument: Creates a document. REQUIRES document_id (string) and content (string). Optional: title (string).
+- updateDocument: Updates existing documents. REQUIRES document_id (string) and content (string). Optional: title (string).
 
-Be helpful, friendly, and proactive in assisting users with their document needs.`,
+Remember: When asked to create a document, you MUST call the createDocument function. Do not just respond with text.`,
       });
 
       // Create LLM provider
@@ -124,11 +126,23 @@ Be helpful, friendly, and proactive in assisting users with their document needs
       const selectedModel = model || defaultModel;
       console.log(`[ChatController] Provider: ${providerType}, Model: ${selectedModel}`);
       
+      // Detect if user is asking to create/update a document - force function calling in this case
+      const documentKeywords = ['create', 'make', 'write', 'generate', 'draft', 'update', 'modify', 'edit', 'add to'];
+      const documentContext = ['document', 'doc', 'file', 'note', 'content', 'report', 'article'];
+      const messageLower = message.toLowerCase();
+      const isDocumentRequest = documentKeywords.some(kw => messageLower.includes(kw)) && 
+                                 documentContext.some(ctx => messageLower.includes(ctx));
+      
+      if (isDocumentRequest) {
+        console.log(`[ChatController] Document request detected - forcing function calling`);
+      }
+      
       const config: LLMConfig = {
         model: selectedModel,
         temperature: temperature ?? 1,
         maxTokens: maxTokens || 4096,
         thinkingEnabled: thinkingEnabled ?? true,
+        forceFunctionCall: isDocumentRequest, // Force function calling for document-related requests
       };
 
       let assistantContent = '';

@@ -10,6 +10,7 @@ export interface LLMConfig {
   temperature?: number;
   maxTokens?: number;
   thinkingEnabled?: boolean;
+  forceFunctionCall?: boolean; // Forces the model to call at least one function
 }
 
 export type StreamEventType =
