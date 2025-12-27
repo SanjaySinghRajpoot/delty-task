@@ -1,5 +1,72 @@
 # Tradeoffs & Technical Decisions
 
+## TL;DR - The 5 Biggest Tradeoffs
+
+### 1. SSE Instead of WebSockets
+
+**What we did:** Used Server-Sent Events (basically one-way HTTP streaming) instead of WebSockets.
+
+**Why it matters:**
+- SSE only goes one direction (server → client). So every time you send a message, it's a new HTTP request. You can't have a persistent back-and-forth connection.
+- If the model needs to call a tool and then continue chatting, we have to handle that awkwardly - the connection closes after each response.
+- On the plus side: way simpler to set up. No socket.io, no connection management headaches. Works behind corporate proxies that block WebSockets.
+
+**Impact:** Works great for simple chat. Falls apart when you need multi-step tool conversations where the model calls a tool, gets the result, and continues reasoning. We'd need WebSockets for that.
+
+---
+
+### 2. No Authentication
+
+**What we did:** Skipped auth entirely. Anyone with the URL can chat.
+
+**Why it matters:**
+- Can't track who's using what. No user sessions, no conversation ownership.
+- Can't do rate limiting per user (someone could spam the API and burn through our LLM credits).
+- Can't persist conversations per user - everyone shares the same conversation IDs basically.
+
+**Impact:** Fine for a demo. In production, this is a security hole AND a billing nightmare. Adding JWT auth would take ~30 min but wasn't worth it for this demo.
+
+---
+
+### 3. Synchronous Tool Execution
+
+**What we did:** When the model calls a tool (like createDocument), we wait for it to finish before sending more events.
+
+**Why it matters:**
+- If a tool takes 10 seconds, the user stares at a frozen screen for 10 seconds.
+- The connection stays open doing nothing. At scale, this wastes resources.
+- What if the tool fails halfway? The whole response dies.
+
+**Impact:** Works because our document tool is fast (just a DB insert). Would totally break if we added tools that call external APIs or do heavy computation.
+
+---
+
+### 4. One Connection Per Chat Request
+
+**What we did:** Each message = one HTTP connection that stays open until streaming finishes.
+
+**Why it matters:**
+- Node.js has a limit on how many connections it can handle (default ~1000).
+- Each open connection = memory being used.
+- If 500 people chat at once, the server might choke.
+
+**Impact:** Demo handles single user fine. With 100+ concurrent users, we'd see timeouts and dropped connections. Fix would be moving to a queue system (Redis/BullMQ) + worker processes.
+
+---
+
+### 5. Loose TypeScript Types
+
+**What we did:** Used `any` in several places, especially in the LLM providers when handling SDK responses.
+
+**Why it matters:**
+- TypeScript can't catch bugs at compile time if we're using `any`.
+- Each LLM provider has different response shapes - instead of typing them properly, we just cast to `any` and hope for the best.
+- Makes refactoring scary - change something and you won't know what breaks until runtime.
+
+**Impact:** Faster to write initially. Technical debt that will bite us when we add more providers or change the event format. Should add proper types with discriminated unions.
+
+---
+
 ## Unified LLM Library Design
 
 ### The Interface
@@ -151,6 +218,4 @@ Watch for: response time degradation, connection errors, memory growth.
 - Console.logs everywhere for debugging, should use proper logger
 
 ---
-
-*Built in ~2.5 hours. Trade-offs were made.*
 

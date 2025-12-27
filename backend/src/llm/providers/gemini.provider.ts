@@ -34,13 +34,10 @@ export class GeminiProvider implements LLMProvider {
         })),
       }] : undefined;
 
-      // Use thinking model if thinking is enabled
-      // gemini-2.0-flash-thinking-exp outputs thoughts separately
-      let modelName = config.model || 'gemini-2.0-flash';
-      if (config.thinkingEnabled) {
-        modelName = 'gemini-2.0-flash-thinking-exp-01-21';
-        console.log('[GeminiProvider] Using thinking model: gemini-2.0-flash-thinking-exp-01-21');
-      }
+      // Use gemini-2.0-flash (standard model)
+      // Note: Gemini doesn't have separate thinking output like Claude
+      // The thinking support code below is kept for future compatibility
+      const modelName = config.model || 'gemini-2.0-flash';
       console.log(`[GeminiProvider] Using model: ${modelName}`);
       console.log(`[GeminiProvider] Tools provided: ${tools?.length || 0}`);
       if (tools && tools.length > 0) {
@@ -55,9 +52,8 @@ export class GeminiProvider implements LLMProvider {
         },
       };
 
-      // Add tools to model config if available (some Gemini models support this)
-      // Note: Thinking model may have limited tool support
-      if (geminiTools && geminiTools.length > 0 && !config.thinkingEnabled) {
+      // Add tools to model config if available
+      if (geminiTools && geminiTools.length > 0) {
         modelConfig.tools = geminiTools;
       }
 
@@ -75,8 +71,8 @@ export class GeminiProvider implements LLMProvider {
         };
       }
 
-      // Add tools if provided and not using thinking model
-      if (geminiTools && geminiTools.length > 0 && !config.thinkingEnabled) {
+      // Add tools if provided
+      if (geminiTools && geminiTools.length > 0) {
         chatConfig.tools = geminiTools;
         const functionCallingMode = config.forceFunctionCall ? "ANY" : "AUTO";
         chatConfig.toolConfig = {
