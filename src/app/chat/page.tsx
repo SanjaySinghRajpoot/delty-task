@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useChatStore } from '@/store/chatStore';
 
 export interface StreamEvent {
-  type: 'text_delta' | 'thinking_delta' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
+  type: 'text_delta' | 'thinking_start' | 'thinking_delta' | 'thinking_end' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
   data?: any;
   error?: string;
 }
@@ -33,6 +33,7 @@ export default function ChatPage() {
 
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [thinking, setThinking] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
   const [toolEvents, setToolEvents] = useState<any[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -104,6 +105,7 @@ export default function ChatPage() {
     updateLastMessage('');
     setCurrentAssistantMessage('');
     setThinking('');
+    setIsThinking(false);
     setToolEvents([]);
     setIsStreaming(true);
 
@@ -237,11 +239,21 @@ export default function ChatPage() {
         }
         break;
 
+      case 'thinking_start':
+        setIsThinking(true);
+        console.log('[ChatPage] Thinking started');
+        break;
+
       case 'thinking_delta':
         const thinkingDelta = event.data?.delta || '';
         if (thinkingDelta) {
           setThinking((prev) => prev + thinkingDelta);
         }
+        break;
+
+      case 'thinking_end':
+        setIsThinking(false);
+        console.log('[ChatPage] Thinking ended');
         break;
 
       case 'tool_call_start':
@@ -338,6 +350,7 @@ export default function ChatPage() {
           updateLastMessage(currentAssistantMessage);
         }
         setCurrentAssistantMessage('');
+        setIsThinking(false);
         break;
 
       case 'error':
@@ -441,7 +454,7 @@ export default function ChatPage() {
 
       {/* Side Panels */}
       <div className="w-96 border-l border-slate-200/80 dark:border-slate-800/80 flex flex-col bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm overflow-hidden">
-        <ThinkingPanel thinking={thinking} />
+        <ThinkingPanel thinking={thinking} isThinking={isThinking} />
         <ToolEventsPanel events={toolEvents} />
         <DocumentViewer document={currentDocument} onDocumentUpdate={handleDocumentUpdate} />
       </div>

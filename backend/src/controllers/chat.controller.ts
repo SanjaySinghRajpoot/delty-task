@@ -39,9 +39,15 @@ export class ChatController {
         if (typeof (res as any).flush === 'function') {
           (res as any).flush();
         }
-        // Debug logging for text deltas
+        // Debug logging for events
         if (event.type === 'text_delta') {
           console.log('[ChatController] Sent text_delta:', event.data?.delta?.substring(0, 50));
+        } else if (event.type === 'thinking_start') {
+          console.log('[ChatController] Thinking started');
+        } else if (event.type === 'thinking_delta') {
+          console.log('[ChatController] Sent thinking_delta:', event.data?.delta?.substring(0, 50));
+        } else if (event.type === 'thinking_end') {
+          console.log('[ChatController] Thinking ended');
         }
       } catch (error) {
         console.error('[ChatController] Error sending event:', error);
@@ -65,10 +71,19 @@ export class ChatController {
           content: m.content,
         }));
 
-      // Add system message
+      // Add system message with thinking-optimized prompt
       messages.unshift({
         role: 'system',
         content: `You are a helpful and friendly AI assistant that helps users create and manage documents through natural conversation.
+
+<thinking_guidelines>
+When thinking through a problem:
+- Break down complex requests into clear steps
+- Consider the user's intent and what they really need
+- Plan your approach before taking action
+- Evaluate different options when applicable
+- For document creation, think about structure, content, and tone
+</thinking_guidelines>
 
 CRITICAL: When a user asks you to create a document, you MUST use the createDocument function/tool. Do not just describe what you would create - actually call the function.
 
@@ -79,19 +94,21 @@ Your personality:
 
 When users ask you to create documents:
 - ALWAYS use the createDocument function/tool - this is mandatory
+- Think through what kind of content would be most helpful
 - Generate document_id and title automatically based on the user's request
 - Include the full content in the function call
 - After the function executes, confirm what you've done in a friendly way (e.g., "I've created a document with 10 tax jokes for you!")
 
 When users ask you to update documents:
 - Use the updateDocument function/tool with the document_id and new content
+- Think about how to best integrate new content with existing content
 - Confirm the update naturally
 
 Available functions:
 - createDocument: Creates a document. REQUIRES document_id (string) and content (string). Optional: title (string).
 - updateDocument: Updates existing documents. REQUIRES document_id (string) and content (string). Optional: title (string).
 
-Remember: When asked to create a document, you MUST call the createDocument function. Do not just respond with text.`,
+Remember: When asked to create a document, you MUST call the createDocument function. Do not just respond with text. Think through your approach, then take action.`,
       });
 
       // Create LLM provider
@@ -159,7 +176,14 @@ Remember: When asked to create a document, you MUST call the createDocument func
               assistantContent += event.data?.delta || '';
               // Send immediately for token-by-token streaming
               sendEvent(event);
+            } else if (event.type === 'thinking_start') {
+              // Notify frontend that thinking has started
+              sendEvent(event);
             } else if (event.type === 'thinking_delta') {
+              // Stream thinking content to frontend
+              sendEvent(event);
+            } else if (event.type === 'thinking_end') {
+              // Notify frontend that thinking has ended
               sendEvent(event);
             } else if (event.type === 'tool_call_start') {
               const { id, name } = event.data;

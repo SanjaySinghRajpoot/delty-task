@@ -15,7 +15,9 @@ export interface LLMConfig {
 
 export type StreamEventType =
   | 'text_delta'
+  | 'thinking_start'
   | 'thinking_delta'
+  | 'thinking_end'
   | 'tool_call_start'
   | 'tool_call_delta'
   | 'tool_call_end'

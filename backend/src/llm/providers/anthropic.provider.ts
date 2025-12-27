@@ -31,23 +31,48 @@ export class AnthropicProvider implements LLMProvider {
         input_schema: tool.parameters,
       }));
 
-      const stream = await this.client.messages.stream({
-        model: config.model || 'claude-3-5-sonnet-20241022',
-        max_tokens: config.maxTokens || 4096,
-        temperature: config.temperature ?? 1,
+      // Build request parameters
+      const requestParams: any = {
+        model: config.model || 'claude-sonnet-4-20250514',
+        max_tokens: config.maxTokens || 16000,
         system: systemMessage?.content,
         messages: conversationMessages as any,
         tools: anthropicTools,
-      });
+      };
+
+      // Enable extended thinking if configured
+      // Note: Extended thinking requires temperature to be 1 and specific models
+      if (config.thinkingEnabled) {
+        requestParams.thinking = {
+          type: 'enabled',
+          budget_tokens: 10000, // Allow up to 10k tokens for thinking
+        };
+        // Temperature must be 1 when thinking is enabled
+        requestParams.temperature = 1;
+        console.log('[AnthropicProvider] Extended thinking enabled with 10k budget tokens');
+      } else {
+        requestParams.temperature = config.temperature ?? 1;
+      }
+
+      const stream = await this.client.messages.stream(requestParams);
 
       let currentToolCall: { id: string; name: string; arguments: string } | null = null;
+      let isInThinkingBlock = false;
 
       for await (const event of stream) {
         if (event.type === 'message_start') {
           // Message started
         } else if (event.type === 'content_block_start') {
-          const block = event.content_block;
-          if (block.type === 'tool_use') {
+          const block = event.content_block as any;
+          if (block.type === 'thinking') {
+            // Thinking block started
+            isInThinkingBlock = true;
+            onEvent?.({
+              type: 'thinking_start',
+              data: { id: block.id || 'thinking' },
+            });
+            console.log('[AnthropicProvider] Thinking block started');
+          } else if (block.type === 'tool_use') {
             currentToolCall = {
               id: block.id,
               name: block.name,
@@ -59,8 +84,14 @@ export class AnthropicProvider implements LLMProvider {
             });
           }
         } else if (event.type === 'content_block_delta') {
-          const delta = event.delta;
-          if (delta.type === 'text_delta') {
+          const delta = event.delta as any;
+          if (delta.type === 'thinking_delta') {
+            // Stream thinking content
+            onEvent?.({
+              type: 'thinking_delta',
+              data: { delta: delta.thinking },
+            });
+          } else if (delta.type === 'text_delta') {
             onEvent?.({
               type: 'text_delta',
               data: { delta: delta.text },
@@ -77,7 +108,15 @@ export class AnthropicProvider implements LLMProvider {
             });
           }
         } else if (event.type === 'content_block_stop') {
-          if (currentToolCall) {
+          if (isInThinkingBlock) {
+            // Thinking block ended
+            isInThinkingBlock = false;
+            onEvent?.({
+              type: 'thinking_end',
+              data: {},
+            });
+            console.log('[AnthropicProvider] Thinking block ended');
+          } else if (currentToolCall) {
             try {
               const args = JSON.parse(currentToolCall.arguments);
               onEvent?.({
@@ -94,8 +133,8 @@ export class AnthropicProvider implements LLMProvider {
             }
           }
         } else if (event.type === 'message_delta') {
-          // Handle thinking/reasoning if available
-          if (event.delta.stop_reason) {
+          // Handle message delta
+          if ((event.delta as any).stop_reason) {
             // Message complete
           }
         } else if (event.type === 'message_stop') {
@@ -103,6 +142,7 @@ export class AnthropicProvider implements LLMProvider {
         }
       }
     } catch (error: any) {
+      console.error('[AnthropicProvider] Error:', error);
       onEvent?.({
         type: 'error',
         error: error.message || 'Anthropic API error',
@@ -111,4 +151,3 @@ export class AnthropicProvider implements LLMProvider {
     }
   }
 }
-
