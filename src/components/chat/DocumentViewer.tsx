@@ -174,7 +174,7 @@ export function DocumentViewer({ document, onDocumentUpdate }: DocumentViewerPro
             >
               {isSaving ? (
                 <>
-                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />GEMINI_API_KEY
                   Saving...
                 </>
               ) : (
