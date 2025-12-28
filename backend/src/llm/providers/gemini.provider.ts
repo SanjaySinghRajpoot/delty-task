@@ -96,6 +96,9 @@ export class GeminiProvider implements LLMProvider {
 
       for await (const chunk of result.stream) {
         try {
+          // Track if we've already sent text from this chunk to avoid duplicates
+          let textSentFromParts = false;
+          
           // Check for thinking content in candidates
           // Gemini thinking model returns thoughts in a separate part
           const candidates = chunk.candidates;
@@ -135,6 +138,7 @@ export class GeminiProvider implements LLMProvider {
                       type: 'text_delta',
                       data: { delta: part.text },
                     });
+                    textSentFromParts = true;
                   }
                   
                   // Handle function calls
@@ -209,16 +213,19 @@ export class GeminiProvider implements LLMProvider {
           }
 
           // Fallback: Handle text content without thought property
-          try {
-            const chunkText = chunk.text();
-            if (chunkText && !thinkingStarted) {
-              onEvent?.({
-                type: 'text_delta',
-                data: { delta: chunkText },
-              });
+          // Only use fallback if we haven't already sent text from parts
+          if (!textSentFromParts) {
+            try {
+              const chunkText = chunk.text();
+              if (chunkText && !thinkingStarted) {
+                onEvent?.({
+                  type: 'text_delta',
+                  data: { delta: chunkText },
+                });
+              }
+            } catch (e) {
+              // chunk.text() might throw if content is function call only
             }
-          } catch (e) {
-            // chunk.text() might throw if content is function call only
           }
 
           // Check if chunk is complete and finalize tool calls

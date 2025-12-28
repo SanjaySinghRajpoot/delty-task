@@ -3,7 +3,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
-import itemRoutes from './routes/item.routes';
 import chatRoutes from './routes/chat.routes';
 import { initDatabase } from './utils/db';
 
@@ -18,13 +17,14 @@ const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = process.env.ALLOWED_ORIGINS
       ? process.env.ALLOWED_ORIGINS.split(',')
-      : ['http://localhost:3000', 'http://localhost:3001'];
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
 
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
       return callback(null, true);
     }
 
+    // In development mode or if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
@@ -54,7 +54,6 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API routes
-app.use('/api/items', itemRoutes);
 app.use('/api/chat', chatRoutes);
 
 // 404 handler
