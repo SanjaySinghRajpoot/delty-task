@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ThinkingPanel } from '@/components/chat/ThinkingPanel';
@@ -23,10 +23,8 @@ export default function ChatPage() {
     messages,
     currentDocument,
     provider,
-    setConversationId,
     setMessages,
     addMessage,
-    updateLastMessage,
     setCurrentDocument,
     setProvider: setStoreProvider,
   } = useChatStore();
@@ -37,7 +35,8 @@ export default function ChatPage() {
   const [toolEvents, setToolEvents] = useState<any[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pendingZustandUpdate = useRef<string | null>(null);
+  // Ref to track latest assistant message content (avoids closure issues in event handlers)
+  const assistantContentRef = useRef<string>('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -46,14 +45,6 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentAssistantMessage]);
-
-  // Update Zustand store after React state updates to avoid render warnings
-  useEffect(() => {
-    if (pendingZustandUpdate.current !== null) {
-      updateLastMessage(pendingZustandUpdate.current);
-      pendingZustandUpdate.current = null;
-    }
-  }, [currentAssistantMessage, updateLastMessage]);
 
   // Load conversation history on mount
   useEffect(() => {
@@ -100,10 +91,9 @@ export default function ChatPage() {
     };
     addMessage(userMessage);
     
-    // Initialize assistant message in store for streaming (empty string creates new message)
-    // This ensures the assistant message exists in the messages array during streaming
-    updateLastMessage('');
+    // Reset streaming state (don't create assistant message prematurely)
     setCurrentAssistantMessage('');
+    assistantContentRef.current = '';
     setThinking('');
     setIsThinking(false);
     setToolEvents([]);
@@ -229,13 +219,11 @@ export default function ChatPage() {
       case 'text_delta':
         const delta = event.data?.delta || '';
         if (delta) {
+          // Update ref synchronously for access in 'done' handler (avoids closure issues)
+          assistantContentRef.current += delta;
           // Update local state for immediate UI update (chunk by chunk)
-          setCurrentAssistantMessage((prev) => {
-            const newContent = prev + delta;
-            // Store pending update to be processed by useEffect (avoids render warning)
-            pendingZustandUpdate.current = newContent;
-            return newContent;
-          });
+          // Only update local state during streaming - store is updated on 'done'
+          setCurrentAssistantMessage(assistantContentRef.current);
         }
         break;
 
@@ -343,12 +331,18 @@ export default function ChatPage() {
         break;
 
       case 'done':
-        // The message is already in the store via updateLastMessage
-        // Just clear the streaming state - don't add duplicate
-        if (currentAssistantMessage) {
-          // Final update to ensure content is saved (message already exists in store)
-          updateLastMessage(currentAssistantMessage);
+        // Use ref to get the actual latest content (avoids closure issues)
+        const finalContent = assistantContentRef.current;
+        if (finalContent) {
+          // Add the final assistant message to the store
+          addMessage({
+            id: `msg-assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            role: 'assistant',
+            content: finalContent,
+          });
         }
+        // Clear streaming state
+        assistantContentRef.current = '';
         setCurrentAssistantMessage('');
         setIsThinking(false);
         break;
@@ -404,36 +398,15 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {messages.map((msg, index) => {
-            // Check if this is the last message and it's being streamed
-            const isLastMessage = index === messages.length - 1;
-            const isStreamingMessage = Boolean(
-              isLastMessage &&
-              msg.role === 'assistant' &&
-              isStreaming &&
-              currentAssistantMessage &&
-              currentAssistantMessage.length > (msg.content?.length || 0)
-            );
-            
-            // Use streaming content if this message is currently being streamed
-            const displayContent = isStreamingMessage ? currentAssistantMessage : msg.content;
-            
-            // Use index as fallback for key to ensure uniqueness
-            return (
-              <ChatMessage
-                key={`${msg.id}-${index}`}
-                message={{
-                  ...msg,
-                  content: displayContent,
-                }}
-                isStreaming={isStreamingMessage}
-              />
-            );
-          })}
-          {/* Show streaming message if no assistant message exists in store yet but we're receiving chunks */}
-          {currentAssistantMessage && 
-           isStreaming && 
-           (messages.length === 0 || messages[messages.length - 1].role !== 'assistant') && (
+          {messages.map((msg, index) => (
+            <ChatMessage
+              key={`${msg.id}-${index}`}
+              message={msg}
+              isStreaming={false}
+            />
+          ))}
+          {/* Show streaming message while receiving chunks */}
+          {isStreaming && currentAssistantMessage && (
             <ChatMessage
               message={{
                 id: 'current-streaming',

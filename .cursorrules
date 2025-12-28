@@ -1,0 +1,136 @@
+Delty Full-Stack Take-Home Assignment
+Build a small end-to-end web application with a React + TypeScript front end and a TypeScript back end, backed by a PostgreSQL database. The app is a chat experience powered by large language models and includes a document creation tool driven by the model.
+
+This assignment is designed to be completed in ~2.5 hours. You are not expected to finish everything—we care more about how you prioritize, structure, and explain tradeoffs than about completeness.
+
+You will have opportunities to go beyond the baseline if you choose.
+
+Goals of the Assignment
+We are evaluating:
+
+• Your ability to design and ship a full-stack feature end-to-end
+• Code quality, clarity, and structure
+• Product and engineering judgment
+• Practical operational awareness (streaming, failure handling, secrets, etc.)
+• Communication of tradeoffs and decisions
+• API design skills: designing a clean, unified interface for multiple model providers
+Core Requirements (Tech Stack)
+You must use:
+
+• Frontend: React + TypeScript
+• Backend: TypeScript (NestJS recommended, alternatives acceptable)
+• Database: PostgreSQL
+• Styling: Tailwind CSS (component libraries optional)
+You may choose any supporting libraries or tools unless explicitly restricted.
+
+The Two Big Things We Care About
+A) Unified LLM Library (Non-negotiable)
+
+You must build a small internal library (within the backend) that provides a single, unified interface to interact with different model providers.
+
+Providers
+
+Your library must include:
+
+• Native integration with Anthropic + Gemini APIs
+• A clear path to add the remaining provider (even if you do not fully implement it)
+Bonus: implement all three providers natively (OpenAI + Anthropic + Gemini).
+
+The unified interface should support
+
+At minimum:
+
+• Sending messages (system + user + assistant style messages)
+• Streaming events (described below)
+• Configuration knobs such as:
+- model name
+- temperature (or equivalent)
+- max output tokens (or equivalent)
+- thinking enabled by default, but configurable (on/off)
+"Thinking" here means provider-specific "reasoning / thinking tokens." We do not care about the exact UI wording; we care that your library can surface this stream separately from normal text.
+
+B) Real-time Streaming to the Frontend
+
+Your backend must stream events to the frontend such that the UI can update live.
+
+You must stream three kinds of information:
+
+Text output stream (assistant content as it's generated)
+Thinking stream (separate from the text stream)
+Tool-use stream (the model deciding to call a tool, plus tool progress/results)
+User Journeys
+1) Chat
+
+Build a chat screen where a user can:
+
+• Type a message and receive a model response
+• See the response appear as a stream, not only at the end
+• See thinking appear as a separate streaming channel (for example, a collapsible panel, side rail, or inline "debug" area)
+• See tool-use events stream in real time (for example, "Calling tool: createDocument", partial updates, completion)
+Baseline scope: single conversation is fine.
+
+Bonus: multiple chat threads (create, switch between, persist).
+
+2) Document Tool (Tool Streaming Required)
+
+Your chat must support a tool that creates or updates a document.
+
+Example user prompts:
+
+• "Create me a document with five different jokes."
+• "Create a short report about large language models."
+Requirements
+
+• The model should be able to "call" a backend tool (for example createDocument or updateDocument)
+• The frontend must show a document viewer/editor area
+• As the tool runs, the document content must update in real time on the frontend (streamed updates)
+Editor expectations
+
+• You have freedom to choose the editor style (plain text, markdown viewer, minimal rich text, etc.)
+• Baseline: the user does not need to manually edit the document (read-only is OK)
+• Bonus: user editing + saving, or collaborative-feeling "live updates" while typing
+Frontend Expectations
+• Clean component structure and meaningful TypeScript types
+• Reasonable user experience (loading, empty states, errors)
+• A clear visualization of:
+- streamed assistant text
+- streamed thinking
+- streamed tool events
+• A document panel that updates live as the tool runs
+Bonus Features (Pick Any Subset)
+Bonus Tier 1: Product UX
+
+• Multiple chat threads (list + switch + persist)
+• Document update flows ("update the document to add 3 more new paragraphs")
+Bonus Tier 2: Auth
+
+• Sign up / sign in / sign out
+Bonus Tier 3: Deployment
+
+• Deploy to Google Cloud Platform or Amazon Web Services
+• Provide at least one working URL
+• Minimal infrastructure is fine
+Deliverables
+1) GitHub Repository
+
+Include:
+
+• Lightweight README with: how to run locally
+• Source code for frontend + backend
+2) Demo (Short)
+
+A short demo video (2–4 minutes) walking through:
+
+• Sending a message and watching text stream
+• Showing thinking stream
+• Triggering a document tool call and watching the document update live
+• If implemented: threads, auth, deployment
+3) Tradeoffs Document
+
+Explain:
+
+• Key technical decisions (especially the unified library interface and streaming design)
+• What you prioritized and why
+• What you intentionally didn't build
+• Biggest risks/limitations
+• What you would do next

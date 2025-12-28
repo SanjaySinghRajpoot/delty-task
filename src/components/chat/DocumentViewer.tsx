@@ -3,7 +3,7 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save, Loader2 } from 'lucide-react';
 import { marked } from 'marked';
@@ -23,6 +23,8 @@ export function DocumentViewer({ document, onDocumentUpdate }: DocumentViewerPro
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState('');
+  // Track the last document content to avoid unnecessary updates
+  const lastDocumentContentRef = useRef<string>('');
 
   const editor = useEditor({
     extensions: [
@@ -42,55 +44,75 @@ export function DocumentViewer({ document, onDocumentUpdate }: DocumentViewerPro
     },
   });
 
-  useEffect(() => {
-    if (document && editor) {
-      // Convert markdown/plain text to HTML for Tiptap using marked
-      let htmlContent = '';
-      try {
-        // Check if content looks like markdown (has markdown syntax)
-        const hasMarkdownSyntax = /^#{1,6}\s|^\*\s|^-\s|^\d+\.\s|^\*\*|^__|^`|^>/m.test(document.content);
-        
-        if (hasMarkdownSyntax) {
-          // Use marked to parse markdown
-          htmlContent = marked.parse(document.content, {
-            breaks: true,
-            gfm: true,
-          }) as string;
-        } else {
-          // Plain text - convert line breaks to paragraphs
-          htmlContent = document.content
-            .split('\n')
-            .map((line) => {
-              if (line.trim() === '') {
-                return '<p><br></p>';
-              }
-              return `<p>${line}</p>`;
-            })
-            .join('');
-        }
-      } catch (error) {
-        console.error('Error parsing markdown:', error);
-        // Fallback to simple text conversion
-        htmlContent = document.content
+  // Convert content to HTML for TipTap
+  const convertToHtml = (content: string): string => {
+    try {
+      // Check if content looks like markdown (has markdown syntax)
+      const hasMarkdownSyntax = /^#{1,6}\s|^\*\s|^-\s|^\d+\.\s|^\*\*|^__|^`|^>/m.test(content);
+      
+      if (hasMarkdownSyntax) {
+        // Use marked to parse markdown (synchronous mode)
+        const result = marked.parse(content, {
+          breaks: true,
+          gfm: true,
+          async: false, // Force synchronous mode
+        });
+        return typeof result === 'string' ? result : content;
+      } else {
+        // Plain text - convert line breaks to paragraphs
+        return content
           .split('\n')
           .map((line) => {
             if (line.trim() === '') {
               return '<p><br></p>';
             }
-            return `<p>${line}</p>`;
+            // Escape HTML entities to prevent XSS
+            const escaped = line
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+            return `<p>${escaped}</p>`;
           })
           .join('');
       }
-
-      editor.commands.setContent(htmlContent);
-      setLastSavedContent(document.content);
-      setHasChanges(false);
-    } else if (!document && editor) {
-      editor.commands.setContent('');
-      setLastSavedContent('');
-      setHasChanges(false);
+    } catch (error) {
+      console.error('Error parsing markdown:', error);
+      // Fallback to simple text conversion
+      return content
+        .split('\n')
+        .map((line) => {
+          if (line.trim() === '') {
+            return '<p><br></p>';
+          }
+          return `<p>${line}</p>`;
+        })
+        .join('');
     }
-  }, [document, editor]);
+  };
+
+  // Update editor when document content changes
+  useEffect(() => {
+    if (!editor) return;
+
+    if (document) {
+      // Only update if content actually changed (compare with ref to avoid unnecessary updates)
+      if (document.content !== lastDocumentContentRef.current) {
+        const htmlContent = convertToHtml(document.content);
+        editor.commands.setContent(htmlContent);
+        lastDocumentContentRef.current = document.content;
+        setLastSavedContent(document.content);
+        setHasChanges(false);
+      }
+    } else {
+      // Clear document
+      if (lastDocumentContentRef.current !== '') {
+        editor.commands.setContent('');
+        lastDocumentContentRef.current = '';
+        setLastSavedContent('');
+        setHasChanges(false);
+      }
+    }
+  }, [document?.content, document?.document_id, editor]);
 
   const handleSave = async () => {
     if (!document || !editor || !onDocumentUpdate) return;
